@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LOGISTRIA — Live Agent Decision Pipeline</title>
+  <meta name="description" content="Live two-agent AI procurement pipeline powered by Groq. Watch supplier ranking and procurement decisions happen in real time." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & tokens ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #111111;
+      --surface:   #1a1a1a;
+      --surface2:  #222222;
+      --border:    #2a2a2a;
+      --accent:    #2F5DE3;
+      --accent-h:  #4a74f5;
+      --text:      #f0f0f0;
+      --text-dim:  #888888;
+      --text-muted:#555555;
+      --green:     #22c55e;
+      --yellow:    #eab308;
+      --red:       #ef4444;
+      --radius:    10px;
+      --mono:      'JetBrains Mono', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ── Layout ───────────────────────────────────────────────────────── */
+    .container { max-width: 860px; margin: 0 auto; padding: 0 24px 80px; }
+
+    /* ── Header ───────────────────────────────────────────────────────── */
+    header {
+      padding: 48px 0 36px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 40px;
+    }
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 8px;
+    }
+    .logo-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+      flex-shrink: 0;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .header-sub {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-left: 24px;
+    }
+
+    /* ── Trigger section ──────────────────────────────────────────────── */
+    .trigger-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 40px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 22px;
+      border-radius: 6px;
+      border: none;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s, opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-h); }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-approve { background: #14532d; color: var(--green); border: 1px solid #166534; }
+    .btn-approve:hover { background: #166534; }
+    .btn-reject  { background: #450a0a; color: var(--red);   border: 1px solid #7f1d1d; }
+    .btn-reject:hover  { background: #7f1d1d; }
+
+    /* Scenario selector */
+    .scenario-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .btn-scenario {
+      flex: 1;
+      min-width: 160px;
+      padding: 10px 16px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-dim);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s, box-shadow 0.15s;
+      text-align: left;
+      line-height: 1.4;
+    }
+    .btn-scenario:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    .btn-scenario.active {
+      border-color: var(--accent);
+      background: #1a2d6e22;
+      color: #fff;
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    .btn-scenario:disabled { opacity: 0.45; cursor: not-allowed; }
+    .scenario-label {
+      display: block;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--accent);
+      margin-bottom: 3px;
+    }
+    .scenario-desc {
+      display: block;
+      font-size: 11px;
+      color: inherit;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .pill-running { background: #1e3a5f; color: #60a5fa; }
+    .spinner {
+      width: 12px; height: 12px;
+      border: 2px solid transparent;
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Pipeline cards ───────────────────────────────────────────────── */
+    #pipeline { display: flex; flex-direction: column; gap: 16px; margin-bottom: 48px; }
+
+    .agent-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+    .agent-card.visible { opacity: 1; transform: translateY(0); }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+    }
+    .card-icon {
+      width: 28px; height: 28px;
+      border-radius: 6px;
+      background: #1a2d6e;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+    .card-title { font-size: 13px; font-weight: 600; }
+    .card-badge {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 9px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-trigger  { background: #1c2b4a; color: #93c5fd; }
+    .badge-agent    { background: #1a2d6e; color: #818cf8; }
+    .badge-approved { background: #14532d; color: var(--green); }
+    .badge-pending  { background: #422006; color: var(--yellow); }
+    .badge-human-ok { background: #14532d; color: var(--green); }
+    .badge-human-no { background: #450a0a; color: var(--red); }
+
+    .card-body { padding: 20px; }
+
+    .kv-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 24px;
+      margin-bottom: 16px;
+    }
+    .kv-item label {
+      display: block;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+    .kv-item span {
+      font-size: 14px;
+      font-weight: 500;
+      font-family: var(--mono);
+    }
+
+    /* Confidence bar */
+    .conf-bar-wrap { margin-bottom: 16px; }
+    .conf-bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 5px;
+    }
+    .conf-bar-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .conf-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
+      background: var(--accent);
+    }
+    .conf-bar-fill.high   { background: var(--green); }
+    .conf-bar-fill.medium { background: var(--yellow); }
+    .conf-bar-fill.low    { background: var(--red); }
+
+    /* Ranked list */
+    .ranked-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .ranked-list li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--surface2);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .rank-num {
+      width: 20px; height: 20px;
+      border-radius: 4px;
+      background: var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-dim);
+      flex-shrink: 0;
+    }
+    .rank-num.top { background: var(--accent); color: #fff; }
+    .rank-name { flex: 1; font-weight: 500; }
+    .rank-badge {
+      font-size: 10px;
+      padding: 1px 7px;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+    .rank-badge.top-pick { background: #1a2d6e; color: #818cf8; }
+
+    /* Reasoning box — no height cap so long reasoning (Scenario 3) is fully visible */
+    .reasoning-box {
+      background: #0d0d0d;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-size: 12.5px;
+      line-height: 1.7;
+      color: #c0c0c0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .reasoning-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    /* Human action row */
+    .human-action-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .human-result {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      display: none;
+    }
+    .human-result.show { display: block; }
+    .human-result.approved { background: #14532d; color: var(--green); }
+    .human-result.rejected { background: #450a0a; color: var(--red); }
+
+    /* ── Decision Log ─────────────────────────────────────────────────── */
+    .log-section { margin-top: 48px; }
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+    .log-table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    thead th {
+      background: var(--surface2);
+      padding: 10px 14px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #1e1e1e; }
+    tbody td {
+      padding: 10px 14px;
+      color: var(--text);
+      vertical-align: middle;
+    }
+    .log-row-high   { background: #0d1f14; }
+    .log-row-medium { background: #1a180a; }
+    .log-row-low    { background: #1a0a0a; }
+    .log-row-human  { background: #0f0f1a; }
+
+    .outcome-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .chip-approved        { background: #14532d; color: var(--green); }
+    .chip-pending         { background: #422006; color: var(--yellow); }
+    .chip-completed       { background: #1a2d6e; color: #818cf8; }
+    .chip-human-approved  { background: #14532d; color: var(--green); }
+    .chip-human-rejected  { background: #450a0a; color: var(--red); }
+    .chip-default         { background: var(--border); color: var(--text-dim); }
+
+    .log-empty {
+      padding: 32px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    /* ── Divider connectors between cards ─────────────────────────────── */
+    .connector {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      height: 20px;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+    .connector.visible { opacity: 1; }
+    .connector-line {
+      width: 1px;
+      height: 100%;
+      background: linear-gradient(to bottom, var(--border), var(--accent));
+    }
+    .connector-arrow {
+      width: 0; height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid var(--accent);
+      margin-top: -1px;
+    }
+
+    /* ── Utilities ────────────────────────────────────────────────────── */
+    .mono { font-family: var(--mono); }
+    .dim  { color: var(--text-dim); }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <div class="logo-row">
+      <div class="logo-dot"></div>
+      <h1>LOGISTRIA — Live Agent Decision Pipeline</h1>
+    </div>
+    <p class="header-sub">Two-agent AI procurement system &nbsp;·&nbsp; Powered by Groq</p>
+  </header>
+
+  <!-- Scenario selector + status -->
+  <div class="scenario-row" id="scenarioRow">
+    <button id="btn-s1" class="btn-scenario active" onclick="selectScenario(1)" data-scenario="1">
+      <span class="scenario-label">Scenario 1</span>
+      <span class="scenario-desc">Clear Auto-Approve</span>
+    </button>
+    <button id="btn-s2" class="btn-scenario" onclick="selectScenario(2)" data-scenario="2">
+      <span class="scenario-label">Scenario 2</span>
+      <span class="scenario-desc">Escalated for Review</span>
+    </button>
+    <button id="btn-s3" class="btn-scenario" onclick="selectScenario(3)" data-scenario="3">
+      <span class="scenario-label">Scenario 3</span>
+      <span class="scenario-desc">Cold-Start Supplier Wins</span>
+    </button>
+  </div>
+  <div class="trigger-row">
+    <div id="runStatus"></div>
+  </div>
+
+  <!-- Pipeline output cards (injected by JS) -->
+  <div id="pipeline"></div>
+
+  <!-- Decision Log -->
+  <div class="log-section">
+    <div class="section-title">Decision Log</div>
+    <div class="log-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>ID</th>
+            <th>Agent</th>
+            <th>Decision</th>
+            <th>Confidence</th>
+            <th>Order Value</th>
+            <th>Outcome</th>
+          </tr>
+        </thead>
+        <tbody id="logBody">
+          <tr><td colspan="7" class="log-empty">No decisions yet — trigger a reorder to begin.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ── State ─────────────────────────────────────────────────────────────── */
+let currentDecisionId  = null;
+let selectedScenario   = 1;
+
+/* ── Scenario selection ─────────────────────────────────────────────────── */
+function selectScenario(num) {
+  selectedScenario = num;
+
+  // Update button highlight
+  document.querySelectorAll('.btn-scenario').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.scenario) === num);
+  });
+
+  // Immediately trigger that scenario's pipeline
+  triggerReorder(num);
+}
+
+/* ── Trigger pipeline ───────────────────────────────────────────────────── */
+async function triggerReorder(scenarioNum) {
+  scenarioNum = scenarioNum || selectedScenario || 1;
+  const status   = document.getElementById('runStatus');
+  const pipeline = document.getElementById('pipeline');
+
+  // Disable all scenario buttons while running
+  document.querySelectorAll('.btn-scenario').forEach(b => b.disabled = true);
+
+  // Clear previous results immediately so old cards don't linger
+  pipeline.innerHTML = '';
+  status.innerHTML = '<span class="status-pill pill-running"><span class="spinner"></span> Running agents…</span>';
+
+  try {
+    const res  = await fetch('/api/trigger-reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: scenarioNum }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      status.innerHTML = `<span style="color:var(--red);font-size:13px;">⚠ ${data.error}</span>`;
+      return;
+    }
+
+    currentDecisionId = data.decision_id;
+    status.innerHTML  = '';
+    renderPipeline(data);
+    refreshLog();
+
+  } catch (err) {
+    status.innerHTML = `<span style="color:var(--red);font-size:13px;">⚠ Request failed: ${err.message}</span>`;
+  } finally {
+    document.querySelectorAll('.btn-scenario').forEach(b => b.disabled = false);
+  }
+}
+
+/* ── Render pipeline cards ──────────────────────────────────────────────── */
+function renderPipeline(data) {
+  const pipeline = document.getElementById('pipeline');
+  pipeline.innerHTML = '';
+
+  // Card 1: Reorder Trigger
+  const triggerCard = makeTriggerCard(data.reorder_trigger);
+  pipeline.appendChild(triggerCard);
+
+  // Connector
+  pipeline.appendChild(makeConnector());
+
+  // Card 2: Supplier Ranking Agent
+  const rankingCard = makeRankingCard(data.ranking_agent);
+  pipeline.appendChild(rankingCard);
+
+  // Connector
+  pipeline.appendChild(makeConnector());
+
+  // Card 3: Procurement Orchestrator
+  const procCard = makeProcCard(data.procurement_orchestrator, data.decision_id, data.ranking_agent.confidence);
+  pipeline.appendChild(procCard);
+
+  // Stagger the appear animations
+  const cards = pipeline.querySelectorAll('.agent-card, .connector');
+  cards.forEach((el, i) => {
+    setTimeout(() => el.classList.add('visible'), i * 220);
+  });
+}
+
+function makeConnector() {
+  const el = document.createElement('div');
+  el.className = 'connector';
+  el.innerHTML = '<div class="connector-line"></div><div class="connector-arrow"></div>';
+  return el;
+}
+
+/* Card 1 */
+function makeTriggerCard(t) {
+  const scenarioLabels = {
+    1: 'Clear Auto-Approve',
+    2: 'Escalated for Review',
+    3: 'Cold-Start Supplier Wins',
+  };
+  const scenarioLabel = t.scenario ? `Scenario ${t.scenario}: ${scenarioLabels[t.scenario] || ''}` : '';
+  const div = document.createElement('div');
+  div.className = 'agent-card';
+  div.innerHTML = `
+    <div class="card-header">
+      <div class="card-icon">📦</div>
+      <span class="card-title">Reorder Trigger</span>
+      ${scenarioLabel ? `<span class="card-badge badge-trigger">${scenarioLabel}</span>` : '<span class="card-badge badge-trigger">INVENTORY</span>'}
+    </div>
+    <div class="card-body">
+      <div class="kv-grid">
+        <div class="kv-item"><label>Product</label><span>${t.product}</span></div>
+        <div class="kv-item"><label>Current Stock</label><span>${t.current_stock} units</span></div>
+        <div class="kv-item"><label>Reorder Threshold</label><span>${t.reorder_threshold} units</span></div>
+        <div class="kv-item"><label>Stock Deficit</label><span style="color:var(--red)">${t.stock_deficit} units below</span></div>
+        <div class="kv-item"><label>Quantity to Order</label><span>${t.quantity_needed} units</span></div>
+      </div>
+    </div>`;
+  return div;
+}
+
+/* Card 2 */
+function makeRankingCard(r) {
+  const conf    = r.confidence ?? 0;
+  const confPct = Math.round(conf * 100);
+  const fillCls = conf >= 0.8 ? 'high' : conf >= 0.5 ? 'medium' : 'low';
+
+  const rankedHtml = (r.ranked_suppliers || []).map((name, i) => {
+    const isTop = name === r.top_pick;
+    return `<li>
+      <div class="rank-num ${isTop ? 'top' : ''}">${i + 1}</div>
+      <span class="rank-name">${name}</span>
+      ${isTop ? '<span class="rank-badge top-pick">TOP PICK</span>' : ''}
+    </li>`;
+  }).join('');
+
+  const div = document.createElement('div');
+  div.className = 'agent-card';
+  div.innerHTML = `
+    <div class="card-header">
+      <div class="card-icon">🏆</div>
+      <span class="card-title">Supplier Ranking Agent</span>
+      <span class="card-badge badge-agent">AGENT 1</span>
+    </div>
+    <div class="card-body">
+      <div class="kv-grid">
+        <div class="kv-item"><label>Top Pick</label><span>${r.top_pick}</span></div>
+        <div class="kv-item"><label>Order Value</label><span>$${(r.order_value ?? 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</span></div>
+        <div class="kv-item"><label>Unit Price</label><span>$${(r.unit_price ?? 0).toFixed(2)}</span></div>
+      </div>
+      <div class="conf-bar-wrap">
+        <div class="conf-bar-label"><span>Confidence</span><span>${confPct}%</span></div>
+        <div class="conf-bar-track">
+          <div class="conf-bar-fill ${fillCls}" style="width:0%" data-target="${confPct}%"></div>
+        </div>
+      </div>
+      <ul class="ranked-list">${rankedHtml}</ul>
+      <div class="reasoning-label">Agent Reasoning</div>
+      <div class="reasoning-box">${escHtml(r.reasoning || '')}</div>
+    </div>`;
+
+  // Animate bar after card renders
+  requestAnimationFrame(() => {
+    const fill = div.querySelector('.conf-bar-fill');
+    if (fill) setTimeout(() => { fill.style.width = fill.dataset.target; }, 500);
+  });
+
+  return div;
+}
+
+/* Card 3 */
+function makeProcCard(p, decisionId, confidence) {
+  const isApproved = p.decision === 'auto_approved';
+  const badgeCls   = isApproved ? 'badge-approved' : 'badge-pending';
+  const badgeTxt   = isApproved ? 'AUTO-APPROVED' : 'PENDING REVIEW';
+  const ov         = p.order_value ?? 0;
+
+  const humanButtons = !isApproved ? `
+    <div class="human-action-row">
+      <button class="btn btn-approve" onclick="humanAction('approve', '${decisionId}')">✓ Approve</button>
+      <button class="btn btn-reject"  onclick="humanAction('reject',  '${decisionId}')">✗ Reject</button>
+    </div>
+    <div id="humanResult" class="human-result"></div>` : '';
+
+  const div = document.createElement('div');
+  div.className = 'agent-card';
+  div.innerHTML = `
+    <div class="card-header">
+      <div class="card-icon">⚖️</div>
+      <span class="card-title">Procurement Orchestrator</span>
+      <span class="card-badge ${badgeCls}">${badgeTxt}</span>
+    </div>
+    <div class="card-body">
+      <div class="kv-grid">
+        <div class="kv-item"><label>Decision</label>
+          <span style="color:${isApproved ? 'var(--green)' : 'var(--yellow)'}">
+            ${isApproved ? 'Auto-Approved' : 'Pending Human Approval'}
+          </span>
+        </div>
+        <div class="kv-item"><label>Order Value</label><span>$${ov.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</span></div>
+        <div class="kv-item"><label>Decision ID</label><span class="mono dim">${decisionId}</span></div>
+      </div>
+      <div class="reasoning-label">Orchestrator Reasoning</div>
+      <div class="reasoning-box">${escHtml(p.reasoning || '')}</div>
+      ${humanButtons}
+    </div>`;
+  return div;
+}
+
+/* ── Human approve / reject ─────────────────────────────────────────────── */
+async function humanAction(action, decisionId) {
+  const endpoint = action === 'approve'
+    ? `/api/approve/${decisionId}`
+    : `/api/reject/${decisionId}`;
+
+  // Disable both buttons immediately
+  document.querySelectorAll('.btn-approve, .btn-reject').forEach(b => b.disabled = true);
+
+  try {
+    const res  = await fetch(endpoint, { method: 'POST' });
+    const data = await res.json();
+
+    const resultEl = document.getElementById('humanResult');
+    if (resultEl) {
+      if (action === 'approve') {
+        resultEl.textContent = `✓ Approved by human — ${data.timestamp}`;
+        resultEl.className   = 'human-result show approved';
+      } else {
+        resultEl.textContent = `✗ Rejected by human — ${data.timestamp}`;
+        resultEl.className   = 'human-result show rejected';
+      }
+    }
+
+    // Update card badge
+    const badge = document.querySelector('.badge-pending');
+    if (badge) {
+      badge.textContent = action === 'approve' ? 'APPROVED' : 'REJECTED';
+      badge.className   = `card-badge ${action === 'approve' ? 'badge-human-ok' : 'badge-human-no'}`;
+    }
+
+    refreshLog();
+  } catch (err) {
+    console.error('Human action failed:', err);
+  }
+}
+
+/* ── Decision Log ────────────────────────────────────────────────────────── */
+async function refreshLog() {
+  try {
+    const res  = await fetch('/api/decision-log');
+    const data = await res.json();
+    renderLog(data);
+  } catch (err) {
+    console.error('Log fetch failed:', err);
+  }
+}
+
+function renderLog(entries) {
+  const tbody = document.getElementById('logBody');
+  if (!entries || entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="log-empty">No decisions yet — trigger a reorder to begin.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = entries.map(e => {
+    const conf      = e.confidence;
+    const rowCls    = rowClass(e.outcome, conf);
+    const chipHtml  = outcomeChip(e.outcome);
+    const confTxt   = conf != null ? `${Math.round(conf * 100)}%` : '—';
+    const ovTxt     = e.order_value != null
+      ? `$${Number(e.order_value).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`
+      : '—';
+    const ts        = e.timestamp ? e.timestamp.replace('T', ' ').replace('Z', '') : '—';
+
+    return `<tr class="${rowCls}">
+      <td class="mono dim" style="font-size:11px">${ts}</td>
+      <td class="mono dim" style="font-size:11px">${e.id || '—'}</td>
+      <td>${e.agent || '—'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(e.decision || '')}">${escHtml(e.decision || '—')}</td>
+      <td>${confTxt}</td>
+      <td>${ovTxt}</td>
+      <td>${chipHtml}</td>
+    </tr>`;
+  }).join('');
+}
+
+function rowClass(outcome, conf) {
+  if (outcome === 'approved_by_human' || outcome === 'rejected_by_human') return 'log-row-human';
+  if (conf == null) return '';
+  if (conf >= 0.8)  return 'log-row-high';
+  if (conf >= 0.5)  return 'log-row-medium';
+  return 'log-row-low';
+}
+
+function outcomeChip(outcome) {
+  const map = {
+    'auto_approved':          ['chip-approved',       'AUTO-APPROVED'],
+    'pending_human_approval': ['chip-pending',        'PENDING'],
+    'completed':              ['chip-completed',      'COMPLETED'],
+    'approved_by_human':      ['chip-human-approved', 'HUMAN APPROVED'],
+    'rejected_by_human':      ['chip-human-rejected', 'HUMAN REJECTED'],
+  };
+  const [cls, label] = map[outcome] || ['chip-default', outcome || 'UNKNOWN'];
+  return `<span class="outcome-chip ${cls}">${label}</span>`;
+}
+
+/* ── Utilities ───────────────────────────────────────────────────────────── */
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* ── Poll log every 3 seconds ────────────────────────────────────────────── */
+refreshLog();
+setInterval(refreshLog, 3000);
+</script>
+</body>
+</html>

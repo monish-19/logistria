@@ -1,0 +1,78 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:///./data/logistria.db
+      ADAPTER: ${ADAPTER:-mock}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      ERP_NEXT_BASE_URL: ${ERP_NEXT_BASE_URL:-}
+      ERP_NEXT_API_KEY: ${ERP_NEXT_API_KEY:-}
+      ERP_NEXT_API_SECRET: ${ERP_NEXT_API_SECRET:-}
+      GENERIC_ADAPTER_CONFIG: ${GENERIC_ADAPTER_CONFIG:-}
+    volumes:
+      - ./backend:/app
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8000/ws/events}
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+  erpnext:
+    image: frappe/erpnext:version-15
+    profiles: ["erpnext"]
+    hostname: erpnext
+    environment:
+      DB_HOST: erpnext-db
+      DB_PORT: "3306"
+      MYSQL_ROOT_PASSWORD: ${ERPNEXT_DB_ROOT_PASSWORD:-change-me}
+      REDIS_CACHE: redis://erpnext-redis-cache:6379
+      REDIS_QUEUE: redis://erpnext-redis-queue:6379
+      SOCKETIO_PORT: "9000"
+      FRAPPE_SITE_NAME_HEADER: ${ERPNEXT_SITE_NAME:-erpnext.localhost}
+    ports:
+      - "8080:8000"
+    depends_on:
+      erpnext-db:
+        condition: service_healthy
+      erpnext-redis-cache:
+        condition: service_started
+      erpnext-redis-queue:
+        condition: service_started
+    volumes:
+      - erpnext-sites:/home/frappe/frappe-bench/sites
+      - erpnext-logs:/home/frappe/frappe-bench/logs
+  erpnext-db:
+    image: mariadb:10.6
+    profiles: ["erpnext"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${ERPNEXT_DB_ROOT_PASSWORD:-change-me}
+      MYSQL_DATABASE: ${ERPNEXT_DB_NAME:-erpnext}
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - erpnext-db:/var/lib/mysql
+  erpnext-redis-cache:
+    image: redis:7-alpine
+    profiles: ["erpnext"]
+  erpnext-redis-queue:
+    image: redis:7-alpine
+    profiles: ["erpnext"]
+
+volumes:
+  erpnext-sites:
+  erpnext-logs:
+  erpnext-db:

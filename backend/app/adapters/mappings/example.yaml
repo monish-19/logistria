@@ -1,0 +1,9 @@
+# Example mapping for a REST ERP with Logistria-shaped responses.
+# Set GENERIC_ADAPTER_CONFIG to this file and GENERIC_BASE_URL to the ERP URL.
+endpoints:
+  get_bom: /v1/products/{product_name}/bom
+  get_stock: /v1/materials/{material_name}/stock
+  reserve_stock: /v1/inventory/reserve
+  list_suppliers: /v1/materials/{material_name}/suppliers
+  get_supplier_history: /v1/suppliers/{supplier_name}/history
+  create_purchase_order: /v1/purchase-orders
