@@ -1,0 +1,15 @@
+   .env
+   .env.*
+   !.env.example
+   node_modules/
+   dist/
+   __pycache__/
+   *.pyc
+   .pytest_cache/
+   .venv/
+   venv/
+   *.db
+   *.sqlite
+   *.log
+   *.tsbuildinfo
+   data/
