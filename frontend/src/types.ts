@@ -25,6 +25,8 @@ export interface RouteOutput {
   distance_km?: number; eta_minutes?: number; delivery_cost?: number; method?: string; ordered_stops?: string[];
 }
 export interface Product { id: number; name: string; sku?: string; reorder_threshold: number; }
+export interface InventoryItem { id: number; material: string; sku?: string; available_qty: number; reserved_qty: number; }
+export interface SupplierItem { id: number; name: string; is_cold_start: boolean; materials: { material_id: number; unit_price: number; lead_time_days: number; }[]; }
 export interface Approval { id: number; run_id: string | null; status: string; comments?: string; approved_by?: string; }
 export interface ChatPlan {
   message: string; plan_id?: string; requires_confirmation?: boolean; shortfall_table?: Record<string, unknown>[];

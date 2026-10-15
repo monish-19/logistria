@@ -54,6 +54,21 @@ def test_events_alerts_and_event_detail_filters(monkeypatch) -> None:
     assert client.get("/api/alerts").status_code == 200
 
 
+def test_unfiltered_events_include_run_ids(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOW_INSECURE_DEV", "true")
+    client = TestClient(app)
+    client.post(
+        "/api/runs",
+        headers={"X-Admin-Key": "test"},
+        json={"product_name": "Widget Pro", "quantity": 5},
+    )
+    response = client.get("/api/events?limit=500")
+    assert response.status_code == 200
+    run_events = [event for event in response.json() if event["payload_json"].get("product_name")]
+    assert run_events
+    assert all(event["run_id"] for event in run_events)
+
+
 def test_reject_and_override_require_admin_and_emit_actions(monkeypatch) -> None:
     monkeypatch.setenv("ALLOW_INSECURE_DEV", "true")
     client = TestClient(app)

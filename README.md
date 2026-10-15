@@ -15,6 +15,13 @@ to the War Room UI.
 - `docs/` - project briefs, phase summaries, demo scripts, and the legacy demo
 - `.github/` - CI and repository instructions
 
+### Frontend redesign phases
+
+Phase 1 establishes the light operations-console layout, IBM Plex typography,
+design tokens, and reusable feed, marker, button, key-value, and supplier
+components. Pipeline animation, replay, and interaction refinements are planned
+for the subsequent phases.
+
 ## Architecture
 
 ```mermaid

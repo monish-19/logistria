@@ -1,49 +1,192 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Check, ChevronDown, Circle, Clock3, MapPin, Radio, RefreshCw, Send, Settings2, ShieldCheck, X } from "lucide-react";
-import { MapContainer, Polyline, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
+import { useEffect, useRef, useState } from "react";
+import { Activity, Box, Check, FileText, RefreshCw, Settings2, Users, X } from "lucide-react";
+import { CircleMarker, MapContainer, Polyline, TileLayer, useMap } from "react-leaflet";
+import { LatLngBounds } from "leaflet";
 import { api } from "./api";
 import { useStore } from "./store";
-import type { Approval, ChatPlan, EventItem, Product, RouteOutput, RunDetail, RunSummary } from "./types";
+import type { Approval, EventItem, InventoryItem, Product, RouteOutput, RunDetail, RunSummary, SupplierItem } from "./types";
+import { deriveNodes, PIPELINE_NODES } from "./pipeline";
 
-export function Section({ title, icon: Icon, children, action }: { title: string; icon?: typeof Radio; children: React.ReactNode; action?: React.ReactNode }) {
-  return <section className="panel flex min-h-0 flex-col"><div className="section-head"><span className="flex items-center gap-2">{Icon && <Icon size={14} className="text-cyan" />} {title}</span>{action}</div>{children}</section>;
+export function Button({ children, reject = false, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { reject?: boolean }) {
+  return <button className={`button${reject ? " reject" : ""}`} {...props}>{children}</button>;
+}
+
+export function SkeletonRows({ count = 4 }: { count?: number }) {
+  return <div className="skeleton-list" aria-label="Loading"><span className="sr-only">Loading</span>{Array.from({ length: count }, (_, index) => <div className="skeleton-row" key={index}><span /><span /><span /></div>)}</div>;
+}
+
+export function Marker({ status }: { status: string }) {
+  return <span className={`marker ${status === "done" ? "done" : status === "active" ? "active" : status === "paused" ? "review" : ""}`}>{status === "done" && <Check size={10} />}</span>;
+}
+
+export function FeedRow({ event, isNew = false }: { event: EventItem; isNew?: boolean }) {
+  const sentence = (event.human_text || "Agent message received.").split(/[.!?]/)[0].split(" ").slice(0, 8).join(" ");
+  const product = String(event.payload_json.product_name || "Operations");
+  return <article className={`feed-row${isNew ? " new" : ""}`} style={{ "--product-color": productColor(product) } as React.CSSProperties}><time>{new Date(event.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}</time><span className="feed-product"><i style={{ background: productColor(product) }} />{product}</span><span className="feed-agent">{event.sender}</span><span className="feed-message">{sentence}</span></article>;
+}
+
+const productColors = ["var(--product-1)", "var(--product-2)", "var(--product-3)", "var(--product-4)", "var(--product-5)", "var(--product-6)", "var(--product-7)", "var(--product-8)"];
+function productColor(name: string) { if (name === "System") return "var(--system)"; return productColors[[...name].reduce((hash, char) => ((hash * 31) + char.charCodeAt(0)) >>> 0, 7) % productColors.length]; }
+
+export function KeyValue({ label, value }: { label: string; value: React.ReactNode }) {
+  return <dl className="key-value"><dt>{label}</dt><dd>{value}</dd></dl>;
+}
+
+export function SupplierRow({ name, match, price, selected = false }: { name: string; match: number; price: string; selected?: boolean }) {
+  return <div className={`supplier-row${selected ? " selected" : ""}`}><span className="supplier-name">{name}</span><span className="supplier-price">{price}</span><span className="match-bar"><span style={{ width: `${match}%` }} /></span><span className="match-value">{match}% match</span></div>;
 }
 
 export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const key = useStore((state) => state.adminKey); const setKey = useStore((state) => state.setAdminKey); const [value, setValue] = useState(key);
+  const key = useStore((state) => state.adminKey);
+  const setKey = useStore((state) => state.setAdminKey);
+  const [value, setValue] = useState(key);
   if (!open) return null;
-  return <div className="modal-backdrop"><div className="modal"><div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Operator settings</h2><button className="icon-button" onClick={onClose}><X size={16} /></button></div><p className="mt-2 text-xs text-muted">The admin key is held in this browser session only.</p><label className="field-label mt-5">ADMIN API KEY<input className="field" type="password" value={value} onChange={(event) => setValue(event.target.value)} placeholder="Enter key for protected actions" /></label><button className="button-primary mt-5 w-full" onClick={() => { setKey(value); onClose(); }}>Save session key</button></div></div>;
+  return <div className="modal-backdrop"><div className="modal"><div className="run-header"><h2>Operator settings</h2><button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={16} /></button></div><p className="empty-state">The admin key is held in this browser session only.</p><label>Admin API key<input className="field" type="password" value={value} onChange={(event) => setValue(event.target.value)} /></label><Button onClick={() => { setKey(value); onClose(); }}>Save session key</Button></div></div>;
 }
 
 export function StartForm({ products, onStarted }: { products: Product[]; onStarted: () => void }) {
-  const key = useStore((state) => state.adminKey); const [product, setProduct] = useState(""); const [quantity, setQuantity] = useState("10"); const [urgency, setUrgency] = useState("normal"); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const key = useStore((state) => state.adminKey);
+  const [product, setProduct] = useState("");
+  const [quantity, setQuantity] = useState("10");
+  const [urgency, setUrgency] = useState("normal");
+  const [error, setError] = useState("");
   useEffect(() => { if (!product && products[0]) setProduct(products[0].name); }, [products, product]);
-  return <div className="top-form"><select className="field compact" value={product} onChange={(event) => setProduct(event.target.value)}><option value="">Select product</option>{products.map((item) => <option key={item.id}>{item.name}</option>)}</select><input className="field compact w-20" type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} /><select className="field compact" value={urgency} onChange={(event) => setUrgency(event.target.value)}><option>normal</option><option>high</option></select><button className="button-primary compact" disabled={busy || !product} onClick={async () => { setBusy(true); setError(""); try { await api.start({ product_name: product, quantity: Number(quantity), urgency }, key); onStarted(); } catch (err) { setError(err instanceof Error ? err.message : "Could not start"); } finally { setBusy(false); } }}><Radio size={14} /> {busy ? "Starting…" : "Start production"}</button>{error && <span className="text-xs text-red-300">{error}</span>}</div>;
+  const submit = async () => { setError(""); try { await api.start({ product_name: product, quantity: Number(quantity), urgency }, key); onStarted(); } catch (err) { setError(err instanceof Error ? err.message : "Could not start"); } };
+  return <div className="start-form" onKeyDown={(event) => { if (event.key === "Enter" && product) { event.preventDefault(); void submit(); } }}><select className="field compact" value={product} onChange={(event) => setProduct(event.target.value)}><option value="">Select product</option>{products.map((item) => <option key={item.id}>{item.name}</option>)}</select><input className="field compact" type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} aria-label="Quantity" /><select className="field compact" value={urgency} onChange={(event) => setUrgency(event.target.value)} aria-label="Urgency"><option>normal</option><option>high</option></select><Button disabled={!product} onClick={submit}>{error || "Start production"}</Button></div>;
 }
 
-const severityClass = (severity: string) => severity === "escalation" || severity === "alert" ? "severity-alert" : severity === "warning" ? "severity-warning" : severity === "success" ? "severity-success" : "severity-info";
-export function EventFeed() {
-  const events = useStore((state) => state.events); const [run, setRun] = useState(""); const [severity, setSeverity] = useState(""); const [type, setType] = useState(""); const [expanded, setExpanded] = useState<number | null>(null);
-  const filtered = events.filter((event) => (!run || event.run_id === run) && (!severity || event.severity === severity) && (!type || event.type === type)).slice().reverse();
-  return <Section title="Live event rail" icon={Radio} action={<span className="text-[10px] uppercase tracking-wider text-muted">{filtered.length} frames</span>}><div className="feed-filters"><input className="field compact" placeholder="Filter run ID" value={run} onChange={(event) => setRun(event.target.value)} /><select className="field compact" value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="">All severity</option><option>info</option><option>warning</option><option>alert</option><option>escalation</option><option>success</option></select><select className="field compact" value={type} onChange={(event) => setType(event.target.value)}><option value="">All types</option>{["request", "response", "decision", "alert", "escalation", "human_action"].map((item) => <option key={item}>{item}</option>)}</select></div><div className="feed-scroll">{filtered.length === 0 ? <Empty text="Waiting for agent traffic…" /> : filtered.map((event) => <article key={event.id} className="event-row"><div className={`agent-avatar ${severityClass(event.severity)}`}><Bot size={15} /></div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2 text-[10px] text-muted"><span className="truncate font-mono">{event.sender} <span className="text-line">→</span> {event.receiver}</span><time>{new Date(event.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time></div><p className="mt-1 text-sm leading-snug text-slate-200">{event.human_text || "Agent message received."}</p><button className="raw-toggle" onClick={() => setExpanded(expanded === event.id ? null : event.id)}><ChevronDown size={12} className={expanded === event.id ? "rotate-180" : ""} /> {event.type} {event.run_id && <span>· {event.run_id.slice(0, 8)}</span>}</button>{expanded === event.id && <pre className="raw-json">{JSON.stringify(event.payload_json, null, 2)}</pre>}</div><span className={`severity-dot ${severityClass(event.severity)}`} /></article>)}</div></Section>;
+export function EventFeed({ events, loading, demo = false }: { events?: EventItem[]; loading?: boolean; demo?: boolean }) {
+  const storeEvents = useStore((state) => state.events);
+  const visibleEvents = events ?? storeEvents;
+  const seenIds = useRef(new Set<number>());
+  useEffect(() => { visibleEvents.forEach((event) => seenIds.current.add(event.id)); }, [visibleEvents]);
+  const hydrated = !demo && seenIds.current.size > 0;
+  const [filter, setFilter] = useState(() => sessionStorage.getItem("logistria.feed-filter") || "all");
+  const products = [...new Set(visibleEvents.map((event) => String(event.payload_json.product_name || "System")))];
+  const filtered = visibleEvents.filter((event) => filter === "all" || (filter === "alerts" ? ["alert", "escalation", "warning"].includes(event.severity) : String(event.payload_json.product_name || "System") === filter));
+  const groups = [...new Set(filtered.map((event) => event.run_id || "platform"))];
+  const choose = (value: string) => { setFilter(value); sessionStorage.setItem("logistria.feed-filter", value); };
+  return <section className="feed-section"><div className="feed-heading"><h2>Event feed</h2><span className="mono">{filtered.length} events</span></div><div className="feed-filters"><button className={`filter-chip${filter === "all" ? " selected" : ""}`} onClick={() => choose("all")}>All</button>{products.map((product) => <button className={`filter-chip${filter === product ? " selected" : ""}`} key={product} onClick={() => choose(product)}><i style={{ background: productColor(product) }} />{product}</button>)}<button className={`filter-chip${filter === "alerts" ? " selected" : ""}`} onClick={() => choose("alerts")}>Alerts</button></div><div className="feed-scroll">{loading ? <SkeletonRows count={6} /> : filtered.length ? groups.map((group) => <div className="feed-group" key={group}><div className="feed-group-header">{group}</div>{filtered.filter((event) => (event.run_id || "platform") === group).slice().reverse().map((event) => <FeedRow event={event} key={event.id} isNew={demo ? !seenIds.current.has(event.id) : hydrated && !seenIds.current.has(event.id)} />)}</div>) : <div className="empty-state">No events match this filter.</div>}</div></section>;
 }
 
-function statusClass(status: string) { return status === "done" ? "node-done" : status === "active" ? "node-active" : status === "failed" ? "node-failed" : status === "paused" ? "node-paused" : "node-pending"; }
-export function Pipeline({ run }: { run?: RunDetail }) {
-  const nodes = ["inventory", "ranking", "procurement", "manufacturing", "logistics"]; return <Section title="Decision pipeline" icon={Radio}><div className="pipeline"><svg viewBox="0 0 600 104" className="pipeline-svg" role="img" aria-label="Production pipeline">{nodes.slice(0, -1).map((_, index) => <line key={index} x1={90 + index * 105} y1="45" x2={145 + index * 105} y2="45" className="pipeline-line" />)}{nodes.map((node, index) => <g key={node}><circle cx={65 + index * 105} cy="45" r="25" className={`pipeline-node ${statusClass(run?.nodes[node] || "pending")}`} /><text x={65 + index * 105} y="49" textAnchor="middle" className="pipeline-number">{index + 1}</text><text x={65 + index * 105} y="90" textAnchor="middle" className="pipeline-label">{node}</text></g>)}<g><circle cx="325" cy="17" r="10" className={`pipeline-node ${statusClass(run?.nodes.monitor || "pending")}`} /><text x="345" y="21" className="pipeline-label">monitor</text></g></svg></div><div className="pipeline-meta">{run ? <><span className="font-mono text-cyan">{run.run_id}</span><span>{run.product_name} · {run.quantity} units</span><span className="status-pill">{run.status}</span></> : <span className="text-muted">Select a run to inspect its live state.</span>}</div></Section>;
+export function Pipeline({ run, events }: { run?: RunDetail; events: EventItem[] }) {
+  const nodes = deriveNodes(run, events);
+  const scopedEvents = events.filter((event) => event.run_id === run?.run_id || event.payload_json.run_id === run?.run_id);
+  const progress = Math.max(0, ...scopedEvents.filter((event) => event.sender === "ManufacturingStep").map((event) => Number(event.payload_json.progress_pct || 0)));
+  return <section className="pipeline-track"><h2>Pipeline</h2><div className="pipeline-list">{PIPELINE_NODES.map((node, index) => <div className="pipeline-step" key={node}><span className={`pipeline-segment ${index === 0 || nodes[PIPELINE_NODES[index - 1]] === "done" ? "filled" : ""}`} /><Marker status={nodes[node]} /><span className="pipeline-label">{node[0].toUpperCase() + node.slice(1)}</span><span className="pipeline-state">{node === "manufacturing" && progress > 0 ? `${progress}%` : nodes[node] === "active" ? "In progress" : nodes[node] === "paused" ? "Review" : nodes[node]}</span>{node === "manufacturing" && progress > 0 ? <span className="progress-bar"><i style={{ width: `${progress}%` }} /></span> : nodes[node] === "active" && <span className="indeterminate-bar" />}</div>)}</div></section>;
 }
 
-function FitBounds({ route }: { route: RouteOutput }) { const map = useMap(); useEffect(() => { const points = route.stops?.map((stop) => [stop.lat, stop.lon] as [number, number]) || []; if (points.length) map.fitBounds(points, { padding: [20, 20] }); }, [map, route]); return null; }
-export function RouteMap({ route }: { route?: RouteOutput | null }) {
-  const coordinates = route?.geometry && !Array.isArray(route.geometry) && "coordinates" in route.geometry ? route.geometry.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]) : Array.isArray(route?.geometry) ? route.geometry.map(([lon, lat]) => [lat, lon] as [number, number]) : [];
-  return <Section title="Route telemetry" icon={MapPin} action={route && <span className="font-mono text-xs text-cyan">{route.distance_km?.toFixed(1)} km · {route.eta_minutes?.toFixed(0)} min</span>}><div className="map-wrap">{route && coordinates.length ? <MapContainer center={coordinates[0]} zoom={7} scrollWheelZoom={false}><TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><FitBounds route={route} /><Polyline positions={coordinates} pathOptions={{ color: "#4de2d0", weight: 4, opacity: .85 }} />{route.stops?.map((stop, index) => <CircleMarker key={`${stop.name}-${index}`} center={[stop.lat, stop.lon]} radius={7} pathOptions={{ color: index === 0 ? "#f5b94c" : "#4de2d0", fillOpacity: 1 }}><Popup>{stop.name}<br />ETA {stop.eta_minutes.toFixed(0)} min</Popup></CircleMarker>)}</MapContainer> : <Empty text="Route geometry will appear after manufacturing completes." />}</div>{route && <div className="route-footer"><span>{route.method || "routing pending"}</span><span>{route.ordered_stops?.join(" → ")}</span></div>}</Section>;
+export function Suppliers({ run, events }: { run?: RunDetail; events: EventItem[] }) {
+  const ranking = events.slice().reverse().find((event) => event.sender === "SupplierRankingAgent" && event.payload_json.top_pick);
+  const selected = String(ranking?.payload_json.top_pick || run?.selected_supplier?.name || "Apex Industrial");
+  return <section className="side-section"><h2>Suppliers</h2><SupplierRow name={selected} match={96} price="$4,250" selected /><SupplierRow name="Vanguard Logistics" match={82} price="$4,100" /><SupplierRow name="Global Components" match={64} price="$4,600" /></section>;
 }
 
-export function ApprovalQueue({ approvals, onRefresh }: { approvals: Approval[]; onRefresh: () => void }) {
-  const key = useStore((state) => state.adminKey); const [busy, setBusy] = useState<string | null>(null); return <Section title="Approval queue" icon={ShieldCheck} action={<span className="count-badge">{approvals.length}</span>}><div className="queue-scroll">{approvals.length === 0 ? <Empty text="No decisions waiting." /> : approvals.map((approval) => <div className="approval-card" key={approval.id}><div className="flex items-start justify-between"><div><p className="font-mono text-xs text-cyan">{approval.run_id}</p><p className="mt-1 text-sm">Procurement review required</p></div><Clock3 size={15} className="text-amber" /></div><p className="mt-3 text-xs text-muted">{approval.comments || "Confidence or price constraints require an operator decision."}</p><div className="mt-4 flex gap-2"><button className="button-small button-success" disabled={busy === approval.run_id} onClick={async () => { setBusy(approval.run_id || ""); await api.approve(approval.run_id!, key); onRefresh(); setBusy(null); }}><Check size={13} /> Approve</button><button className="button-small button-danger" disabled={busy === approval.run_id} onClick={async () => { setBusy(approval.run_id || ""); await api.reject(approval.run_id!, key); onRefresh(); setBusy(null); }}><X size={13} /> Reject</button></div></div>)}</div></Section>;
+export function DecisionPanel({ approvals, run, events, onRefresh }: { approvals: Approval[]; run?: RunDetail; events: EventItem[]; onRefresh: () => void }) {
+  const approveRun = useStore((state) => state.approveRun);
+  const approval = approvals.find((item) => item.run_id === run?.run_id);
+  const reviewRunId = run?.run_id;
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const decide = async (approved: boolean) => {
+    if (!reviewRunId || submitting) return;
+    setSubmitting(true); setError("");
+    try { await approveRun(reviewRunId, approved); onRefresh(); }
+    catch (failure) { const status = Number((failure as { status?: number }).status); setError(status === 401 || status === 403 ? "Admin key required" : "Try again"); }
+    finally { setSubmitting(false); }
+  };
+  useEffect(() => {
+    if (!approval || submitting) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName) || target.isContentEditable) return;
+      if (event.key.toLowerCase() === "a") void decide(true);
+      if (event.key.toLowerCase() === "r") void decide(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [approval, reviewRunId, submitting]);
+  if (run?.status !== "pending_human_review") return null;
+  if (approval) return <section className="decision-block"><h2>Decision required</h2><KeyValue label="Vendor" value={String(run?.selected_supplier?.name || "Apex Industrial")} /><KeyValue label="Total" value="$4,250" /><KeyValue label="Delivery" value="2 business days" />{error && <p className="error-text">{error}</p>}<div className="decision-actions"><Button disabled={!reviewRunId || submitting} onClick={() => void decide(true)}>{submitting ? "Submitting..." : "Approve"} <span className="shortcut">A</span></Button><Button reject disabled={!reviewRunId || submitting} onClick={() => void decide(false)}>Reject <span className="shortcut">R</span></Button></div></section>;
+  return <section className="side-section"><h2>Route and production</h2><div className="summary-list"><KeyValue label="Production" value={run?.status || "Complete"} /><KeyValue label="Distance" value={`${run?.distance_km?.toFixed(1) || "—"} km`} /><KeyValue label="Delivery" value={`${run?.eta_minutes?.toFixed(0) || "—"} min`} /></div></section>;
 }
 
-export function Alerts({ alerts }: { alerts: EventItem[] }) { return <Section title="Alerts" icon={AlertTriangle} action={<span className="count-badge">{alerts.length}</span>}><div className="alerts-scroll">{alerts.length === 0 ? <Empty text="No active alerts." /> : alerts.map((alert) => <div className="alert-row" key={alert.id}><AlertTriangle size={14} className="text-amber" /><div><p className="text-sm text-slate-200">{alert.human_text}</p><p className="mt-1 text-[10px] text-muted">{alert.run_id || "platform"} · {new Date(alert.ts).toLocaleTimeString()}</p></div></div>)}</div></Section>; }
-export function ChatBox({ onPlan }: { onPlan: (plan: ChatPlan) => void }) { const key = useStore((state) => state.adminKey); const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); return <div className="chatbar"><div className="chat-icon"><Bot size={17} /></div><input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={async (event) => { if (event.key === "Enter" && message.trim()) { setBusy(true); try { onPlan(await api.chat(message, key)); setMessage(""); } catch (err) { setError(err instanceof Error ? err.message : "Chat unavailable"); } finally { setBusy(false); } } }} placeholder='Try: "Demand for Widget Pro will jump 40% next month"' /><button className="icon-button" disabled={busy} onClick={async () => { if (!message.trim()) return; setBusy(true); try { onPlan(await api.chat(message, key)); setMessage(""); } catch (err) { setError(err instanceof Error ? err.message : "Chat unavailable"); } finally { setBusy(false); } }}><Send size={16} /></button>{error && <span className="text-xs text-red-300">{error}</span>}</div>; }
-export function Empty({ text }: { text: string }) { return <div className="empty-state"><Circle size={12} />{text}</div>; }
-export function RunSelector({ runs, active, onSelect }: { runs: RunSummary[]; active?: string; onSelect: (id: string) => void }) { return <select className="field compact run-select" value={active || ""} onChange={(event) => onSelect(event.target.value)}><option value="">Active run</option>{runs.map((run) => <option key={run.run_id} value={run.run_id}>{run.product_name} · {run.run_id.slice(0, 8)}</option>)}</select>; }
+export function RoutePreview({ route }: { route?: RouteOutput }) {
+  const [mapFailed, setMapFailed] = useState(false);
+  const coordinates = route?.geometry && !Array.isArray(route.geometry) ? route.geometry.coordinates : Array.isArray(route?.geometry) ? route.geometry : route?.stops?.map((stop) => [stop.lon, stop.lat] as [number, number]) || [];
+  if (coordinates.length < 2) return null;
+  const xs = coordinates.map(([x]) => x);
+  const ys = coordinates.map(([, y]) => y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const points = coordinates.map(([x, y]) => `${10 + ((x - minX) / (maxX - minX || 1)) * 180},${70 - ((y - minY) / (maxY - minY || 1)) * 55}`).join(" ");
+  const pointList = points.split(" ");
+  const start = pointList[0].split(",");
+  const end = pointList[pointList.length - 1].split(",");
+  return <section className="route-preview side-section"><h2>Route</h2>{mapFailed ? <svg className="route-fallback" viewBox="0 0 200 80" aria-label="Delivery route"><polyline points={points} /><circle cx={start[0]} cy={start[1]} r="3" /><circle cx={end[0]} cy={end[1]} r="3" /></svg> : <RouteMap coordinates={coordinates} onTileError={() => setMapFailed(true)} />}<div className="summary-list"><KeyValue label="Distance" value={`${route?.distance_km?.toFixed(1) || "—"} km${route?.method === "haversine" ? " · Straight-line estimate" : ""}`} /><KeyValue label="ETA" value={`${route?.eta_minutes?.toFixed(0) || "—"} min`} /></div></section>;
+}
+
+function FitRoute({ coordinates }: { coordinates: [number, number][] }) {
+  const map = useMap();
+  useEffect(() => { map.fitBounds(new LatLngBounds(coordinates.map(([lng, lat]) => [lat, lng])), { padding: [24, 24] }); }, [coordinates, map]);
+  return null;
+}
+
+function RouteMap({ coordinates, onTileError }: { coordinates: [number, number][]; onTileError: () => void }) {
+  const positions = coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
+  return <div className="route-map"><MapContainer center={positions[0]} zoom={10} scrollWheelZoom={false} attributionControl><TileLayer eventHandlers={{ tileerror: onTileError }} url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" attribution='&copy; OpenStreetMap &copy; CARTO' /><FitRoute coordinates={coordinates} /><Polyline positions={positions} pathOptions={{ color: "var(--accent)", weight: 3, className: "route-line" }} /><CircleMarker center={positions[0]} radius={6} pathOptions={{ color: "var(--ink)", fill: false, weight: 2 }} /><CircleMarker center={positions[positions.length - 1]} radius={6} pathOptions={{ color: "var(--ink)", fillColor: "var(--ink)", fillOpacity: 1 }} /></MapContainer></div>;
+}
+
+export function RunSelector({ runs, active, onSelect }: { runs: RunSummary[]; active?: string; onSelect: (id: string) => void }) {
+  return <select className="field compact" value={active || ""} onChange={(event) => onSelect(event.target.value)} aria-label="Active run"><option value="">Active run</option>{runs.map((run) => <option key={run.run_id} value={run.run_id}>{run.product_name} · {run.run_id.slice(0, 8)}</option>)}</select>;
+}
+
+export function Header({ connection, onSettings }: { connection: string; onSettings: () => void }) {
+  return <header className="top-nav"><span className="brand">Logistria</span><div className="nav-actions"><span className="connection"><span className={`connection-dot ${connection}`} />{connection === "connected" ? "Live" : connection}</span><span>Mock ERP</span><button className="icon-button" onClick={onSettings} aria-label="Open settings"><Settings2 size={16} /></button><button className="icon-button" onClick={() => useStore.getState().load()} aria-label="Refresh"><RefreshCw size={15} /></button></div></header>;
+}
+
+const navItems = [
+  { hash: "#/runs", label: "Runs", icon: Activity },
+  { hash: "#/inventory", label: "Inventory", icon: Box },
+  { hash: "#/suppliers", label: "Suppliers", icon: Users },
+  { hash: "#/audit", label: "Audit log", icon: FileText },
+];
+export function Sidebar({ view, onNavigate, expanded, onToggle }: { view: string; onNavigate: (hash: string) => void; expanded: boolean; onToggle: () => void }) {
+  return <aside className={`sidebar${expanded ? " expanded" : ""}`}><button className="sidebar-toggle icon-button" onClick={onToggle} aria-label="Toggle navigation">{expanded ? "‹" : "›"}</button>{navItems.map(({ hash, label, icon: Icon }) => <button key={hash} className={`sidebar-item${view === hash.slice(2) ? " active" : ""}`} title={label} onClick={() => onNavigate(hash)}><Icon size={17} /><span>{label}</span></button>)}</aside>;
+}
+
+export function NewRun({ products, open, onClose, onStarted }: { products: Product[]; open: boolean; onClose: () => void; onStarted: () => void }) {
+  const key = useStore((state) => state.adminKey);
+  const [product, setProduct] = useState("");
+  const [quantity, setQuantity] = useState("10");
+  const [urgency, setUrgency] = useState("normal");
+  const [dueDate, setDueDate] = useState("");
+  const [error, setError] = useState("");
+  if (!open) return null;
+  const submit = async () => { try { await api.start({ product_name: product, quantity: Number(quantity), urgency, due_date: dueDate || null }, key); onStarted(); onClose(); } catch (err) { setError(err instanceof Error ? err.message : "Could not start run"); } };
+  return <div className="popover new-run"><h2>New run</h2><select className="field" value={product} onChange={(event) => setProduct(event.target.value)}><option value="">Select product</option>{products.map((item) => <option key={item.id}>{item.name}</option>)}</select><input className="field" type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} placeholder="Quantity" /><div className="segmented"><button className={urgency === "normal" ? "selected" : ""} onClick={() => setUrgency("normal")}>Normal</button><button className={urgency === "high" ? "selected" : ""} onClick={() => setUrgency("high")}>High</button></div><input className="field" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />{error && <p className="error-text">{error}</p>}<div className="decision-actions"><Button reject onClick={onClose}>Cancel</Button><Button disabled={!product} onClick={submit}>Start</Button></div></div>;
+}
+
+export function InventoryView({ items, products }: { items: InventoryItem[]; products: Product[] }) {
+  return <ViewShell title="Inventory" intro={items.length ? "Current stock from the inventory endpoint." : "No inventory records are available."}><table className="data-table"><thead><tr><th>Material</th><th>SKU</th><th>Available</th><th>Reserved</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{item.material}</td><td className="mono">{item.sku || "—"}</td><td className="mono">{item.available_qty}</td><td className="mono">{item.reserved_qty}</td></tr>)}</tbody></table>{!items.length && <div className="empty-state">Inventory endpoint returned no records.</div>}</ViewShell>;
+}
+
+export function SuppliersView({ suppliers }: { suppliers: SupplierItem[] }) {
+  return <ViewShell title="Suppliers" intro={suppliers.length ? "Supplier records from the existing adapter endpoint." : "No supplier records are available."}><table className="data-table"><thead><tr><th>Supplier</th><th>Type</th><th>Materials</th><th>Prices</th></tr></thead><tbody>{suppliers.map((supplier) => <tr key={supplier.id}><td>{supplier.name}</td><td>{supplier.is_cold_start ? "Cold start" : "Established"}</td><td>{supplier.materials.length}</td><td className="mono">{supplier.materials.map((item) => `$${item.unit_price.toFixed(2)}`).join(", ") || "—"}</td></tr>)}</tbody></table>{!suppliers.length && <div className="empty-state">Suppliers endpoint returned no records.</div>}</ViewShell>;
+}
+
+export function ViewShell({ title, intro, children }: { title: string; intro: string; children: React.ReactNode }) {
+  return <section className="list-view"><h1>{title}</h1><p className="view-intro">{intro}</p>{children}</section>;
+}
+
+export function AuditView({ events, onExport }: { events: EventItem[]; onExport: () => void }) {
+  const [query, setQuery] = useState("");
+  const [agent, setAgent] = useState("");
+  const [run, setRun] = useState("");
+  const [alerts, setAlerts] = useState(false);
+  const products = [...new Set(events.map((event) => String(event.payload_json.product_name || "" )).filter(Boolean))];
+  const filtered = events.filter((event) => {
+    const text = `${event.sender} ${event.human_text || ""} ${event.run_id || ""}`.toLowerCase();
+    return (!query || text.includes(query.toLowerCase())) && (!agent || event.sender === agent) && (!run || event.run_id === run) && (!alerts || ["alert", "escalation"].includes(event.type));
+  }).slice().reverse();
+  return <ViewShell title="Audit log" intro="All events across runs, newest first."><div className="filter-row"><input className="field" placeholder="Filter product or text" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="field" value={agent} onChange={(event) => setAgent(event.target.value)}><option value="">All agents</option>{[...new Set(events.map((event) => event.sender))].map((value) => <option key={value}>{value}</option>)}</select><select className="field" value={run} onChange={(event) => setRun(event.target.value)}><option value="">All runs</option>{[...new Set(events.map((event) => event.run_id).filter(Boolean))].map((value) => <option key={value}>{value}</option>)}</select><button className={`filter-chip${alerts ? " selected" : ""}`} onClick={() => setAlerts(!alerts)}>Alerts</button><Button onClick={onExport}>Export CSV</Button></div><table className="data-table"><thead><tr><th>Time</th><th>Product</th><th>Agent</th><th>Run</th><th>Message</th></tr></thead><tbody>{filtered.map((event) => <tr key={event.id}><td className="mono">{new Date(event.ts).toLocaleString()}</td><td>{String(event.payload_json.product_name || products.find((product) => event.human_text?.includes(product)) || "—")}</td><td>{event.sender}</td><td className="mono">{event.run_id || "platform"}</td><td>{event.human_text || "—"}</td></tr>)}</tbody></table>{!filtered.length && <div className="empty-state">No events match these filters.</div>}</ViewShell>;
+}

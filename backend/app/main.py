@@ -315,7 +315,7 @@ def list_events(
         if before:
             query = query.filter(EventLog.id < before)
         rows = query.limit(limit).all()
-        return [_event_response(row, run_id) for row in reversed(rows)]
+        return [_event_response(row, row.run.run_id if row.run else None) for row in reversed(rows)]
 
 
 @app.get("/api/events/{event_id}", response_model=EventResponse)

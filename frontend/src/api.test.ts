@@ -9,7 +9,7 @@ describe("api client", () => {
 
     await expect(api.audit({ runId: "run 1", severity: "warning", type: "alert" })).resolves.toEqual([{ id: 7 }]);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/events?run_id=run+1&severity=warning&type=alert&limit=500",
+      `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/api/events?run_id=run+1&severity=warning&type=alert&limit=500`,
       expect.objectContaining({ headers: { "Content-Type": "application/json" } }),
     );
   });
