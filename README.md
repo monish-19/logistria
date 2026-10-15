@@ -1,8 +1,19 @@
 # Logistria
 
-Logistria is a deterministic operations control plane that sits above an ERP/SCM.
-It checks inventory, ranks suppliers, gates procurement, simulates manufacturing,
-optimizes delivery routes, and streams every decision to the War Room UI.
+[![CI](https://github.com/monish-19/logistria/actions/workflows/ci.yml/badge.svg)](https://github.com/monish-19/logistria/actions/workflows/ci.yml)
+
+Logistria is a deterministic operations control plane for supply-chain teams that
+sits above an ERP/SCM. It checks inventory, ranks suppliers, gates procurement,
+simulates manufacturing, optimizes delivery routes, and streams every decision
+to the War Room UI.
+
+## Project structure
+
+- `backend/` - FastAPI API, agents, adapters, and database migrations
+- `frontend/` - React + Vite War Room UI
+- `scripts/` - operational and ERPNext seed scripts
+- `docs/` - project briefs, phase summaries, demo scripts, and the legacy demo
+- `.github/` - CI and repository instructions
 
 ## Architecture
 
@@ -33,7 +44,9 @@ network access, or ERPNext.
 
 ## Setup
 
-### Local
+### Windows (PowerShell)
+
+#### Local
 
 ```powershell
 Copy-Item .env.example .env
@@ -57,7 +70,7 @@ npm run dev
 The API is available at <http://localhost:8000> and the War Room at
 <http://localhost:5173>.
 
-### Docker
+#### Docker
 
 ```powershell
 Copy-Item .env.example .env
@@ -77,7 +90,7 @@ Set `ADAPTER=erpnext` and `ERP_NEXT_BASE_URL=http://erpnext:8000` in the backend
 environment when running the backend inside Compose. Keep
 `ADAPTER_FALLBACK=true` for a deterministic local fallback if ERPNext is down.
 
-### Supabase
+#### Supabase
 
 1. Create a Supabase project and copy its Session Pooler connection string.
 2. Set `DATABASE_URL` to the `postgresql://...` URI with `sslmode=require`.
@@ -88,6 +101,54 @@ $env:DATABASE_URL = "postgresql://postgres.<project-ref>:<password>@<pooler-host
 Set-Location backend
 alembic upgrade head
 python -c "from app.seed import seed_database; seed_database()"
+uvicorn app.main:app --reload
+```
+
+### macOS / Linux (bash)
+
+#### Local
+
+```bash
+cp .env.example .env
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r backend/requirements.txt
+cd backend
+python3 -c "from app.seed import seed_database; seed_database()"
+export ALLOW_INSECURE_DEV=true
+uvicorn app.main:app --reload
+```
+
+In a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+#### Docker
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+To start the ERPNext profile and seed it:
+
+```bash
+docker compose --profile erpnext up -d erpnext-db erpnext-redis-cache erpnext-redis-queue erpnext
+ERPNEXT_URL=http://localhost:8080 python3 scripts/erpnext_seed.py
+```
+
+#### Supabase
+
+```bash
+export DATABASE_URL='postgresql://postgres.<project-ref>:<password>@<pooler-host>:5432/postgres?sslmode=require'
+cd backend
+alembic upgrade head
+python3 -c "from app.seed import seed_database; seed_database()"
+export ALLOW_INSECURE_DEV=true
 uvicorn app.main:app --reload
 ```
 
@@ -119,6 +180,8 @@ uvicorn app.main:app --reload
 
 Start the API with `ALLOW_INSECURE_DEV=true` for this local-only script. Every
 request below is deterministic with the seeded MockAdapter.
+
+### Windows (PowerShell)
 
 ### 1. Enough stock
 
@@ -189,6 +252,63 @@ Invoke-RestMethod http://localhost:8000/api/chat/confirm -Method Post -ContentTy
 
 Expected outcome: the first call returns a shortfall and
 `requires_confirmation=true`; only the second call starts the production run.
+
+### macOS / Linux (bash)
+
+Start the API with `ALLOW_INSECURE_DEV=true` for this local-only script. Every
+request below is deterministic with the seeded MockAdapter.
+
+#### 1. Enough stock
+
+```bash
+curl -sS http://localhost:8000/api/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"product_name":"Widget Pro","quantity":5,"due_date":"2035-01-20","urgency":"normal"}'
+```
+
+#### 2. Automatic purchase order
+
+```bash
+curl -sS http://localhost:8000/api/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"product_name":"Precision Gear","quantity":70,"due_date":"2035-01-20","urgency":"normal"}'
+```
+
+#### 3. Human review and resume
+
+```bash
+pending=$(curl -sS http://localhost:8000/api/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"product_name":"Sensor Module B3","quantity":50,"due_date":"2035-01-10","urgency":"high"}')
+printf '%s\n' "$pending"
+run_id=$(printf '%s' "$pending" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+curl -sS "http://localhost:8000/api/runs/$run_id/approve" \
+  -H 'Content-Type: application/json' \
+  -d '{"approved":true}'
+```
+
+#### Cold-start supplier win
+
+```bash
+cd backend
+python3 -c "from tests.test_phase1 import test_cold_start_supplier_can_win_when_established_suppliers_are_poor; test_cold_start_supplier_can_win_when_established_suppliers_are_poor()"
+cd ..
+```
+
+#### Demand-spike chat
+
+```bash
+plan=$(curl -sS http://localhost:8000/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Demand for Product X will jump 40% next month"}')
+printf '%s\n' "$plan"
+plan_id=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["plan_id"])')
+product_name=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["product_name"])')
+quantity=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["recommended_quantity"])')
+curl -sS http://localhost:8000/api/chat/confirm \
+  -H 'Content-Type: application/json' \
+  -d "{\"plan_id\":\"$plan_id\",\"product_name\":\"$product_name\",\"quantity\":$quantity,\"due_date\":\"2035-02-15\",\"urgency\":\"high\"}"
+```
 
 ## Validation
 
