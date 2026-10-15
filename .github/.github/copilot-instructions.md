@@ -1,6 +1,6 @@
 # Logistria project rules (Cline reads this automatically)
 
-- The source of truth is BUILD_BRIEF.md. Read it fully at the start of every task.
+- The source of truth is docs/BUILD_BRIEF.md. Read it fully at the start of every task.
 - Work on ONE phase at a time. When a phase's acceptance checks pass, STOP and report. Do not start the next phase.
 - Backend: Python 3.11+, FastAPI, LangGraph, SQLAlchemy + SQLite (Postgres-ready via DATABASE_URL), LiteLLM for all LLM calls.
 - Frontend: React + Vite + TypeScript + Tailwind, Leaflet for maps.

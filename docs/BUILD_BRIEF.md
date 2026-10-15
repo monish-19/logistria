@@ -1,8 +1,8 @@
 # LOGISTRIA — Build Brief
 
 Autonomous multi-agent layer that sits on top of an existing ERP/SCM (no migration, no replacement).
-Reference demo (2 agents, 3 hardcoded scenarios) is in /legacy_demo. Reuse its ideas, not its structure.
-Do NOT copy the hardcoded API key found in legacy_demo/logistria_demo.py.
+Reference demo (2 agents, 3 hardcoded scenarios) is in /docs/legacy_demo. Reuse its ideas, not its structure.
+Do NOT copy the hardcoded API key found in docs/legacy_demo/logistria_demo.py.
 
 ## 1. Flow (deterministic LangGraph state machine)
 
@@ -54,7 +54,7 @@ Implementations: (a) `MockAdapter` (SQLite seed data, default), (b) `ERPNextAdap
 
 ## 6. LLM layer (LiteLLM, provider-agnostic)
 
-- Default provider is Groq (already proven to work in legacy_demo). Config in .env: LLM_PROVIDER, PRIMARY_MODEL=groq/openai/gpt-oss-120b, NARRATOR_MODEL (a smaller, cheaper Groq model from the account's model list), FALLBACK_MODEL (optional, any other provider e.g. gemini/... or openrouter/...). Switching provider must need only .env changes.
+- Default provider is Groq (already proven to work in docs/legacy_demo). Config in .env: LLM_PROVIDER, PRIMARY_MODEL=groq/openai/gpt-oss-120b, NARRATOR_MODEL (a smaller, cheaper Groq model from the account's model list), FALLBACK_MODEL (optional, any other provider e.g. gemini/... or openrouter/...). Switching provider must need only .env changes.
 - Free-tier budget is tight (about 30 requests/min, 8K tokens/min and 200K tokens/day on gpt-oss-120b). So: keep prompts short, send only the numbers an agent needs, use a global token-bucket limiter below those limits, and cache identical calls.
 - Narration is TEMPLATE-FIRST: every event type has a plain-English template filled from the payload. Use the LLM only for escalations, alerts and supplier-ranking explanations (and chat). Never call the LLM once per low-severity event.
 - Central wrapper: timeout 30s, 1 retry, fall to FALLBACK_MODEL on 429/5xx, then to the template text. The pipeline must still finish with no LLM at all.
@@ -67,7 +67,7 @@ Seed script: 3 products, 8 materials, 8 suppliers (mix of established + new) so 
 ## 8. Repo layout
 
 /backend/app/{main.py, config.py, bus.py, llm.py, graph.py, agents/{inventory,ranking,procurement,manufacturing,logistics,monitor,chat,narrator}.py, adapters/{base,mock,erpnext,generic}.py, models.py, seed.py}
-/backend/tests  /frontend (Vite React TS)  /legacy_demo  .env.example  README.md  docker-compose.yml (optional)
+/backend/tests  /frontend (Vite React TS)  /docs/legacy_demo  .env.example  README.md  docker-compose.yml (optional)
 
 ## 9. Phases (do ONE at a time; stop after acceptance passes)
 
