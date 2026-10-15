@@ -319,3 +319,7 @@ Set-Location ..\frontend
 npm test
 npm run build
 ```
+
+## License
+
+MIT License - see [LICENSE](LICENSE).
